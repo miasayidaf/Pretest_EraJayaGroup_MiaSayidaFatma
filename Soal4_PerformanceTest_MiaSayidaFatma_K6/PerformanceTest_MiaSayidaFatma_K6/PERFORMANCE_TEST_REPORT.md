@@ -1,134 +1,251 @@
-# Performance Test Report — DemoQA Book Store API
+# Laporan Hasil Performance Testing — DemoQA Book Store API
 
 **Project:** PerformanceTest_MiaSayidaFatma  
-**Tool:** Grafana k6  
-**System under test:** `https://demoqa.com` (public demonstration application)  
-**Evidence:** Six JSON summaries and six k6 Web Dashboard HTML exports included in the uploaded project archive.  
-**Report basis:** Values below are extracted from the supplied `results/*.json` files; no tests were rerun to produce this document.
+**Penguji:** Mia Sayida Fatma  
+**Tools:** Grafana k6 (JavaScript)  
+**Aplikasi:** DemoQA Book Store API  
+**Base URL pada script:** `https://demoqa.com`  
+**Sumber hasil:** File `results/*.json` dan dashboard `results/*-report.html` dari arsip pengujian.  
 
-## 1. Objective and scope
+## 1. Ringkasan Pengujian
 
-Evaluate baseline latency, behavior under 10/50/100 virtual users, stress at 100 virtual users, and 30-minute soak stability for the Book Store API. The measured workflow is Login → Generate Token → Browse Books → Select Book → Cleanup Collection → Add Book. Cleanup runs **before** Add Book, and deletes all books in the test account collection; use only disposable accounts.
+Performance testing dilakukan untuk melihat respons API Book Store saat digunakan oleh sejumlah virtual user (VU) dengan tingkat beban yang berbeda. Pengujian mencakup kondisi awal dengan satu pengguna, peningkatan beban secara bertahap hingga 100 VU, kenaikan beban yang lebih cepat melalui stress test, serta pengujian berkelanjutan selama 30 menit melalui soak test.
 
-## 2. Workload configuration
+Laporan ini disusun berdasarkan hasil eksekusi yang tersimpan pada folder `results`. Pengujian tidak dijalankan ulang saat penyusunan laporan. Dengan demikian, seluruh angka yang dibahas mengacu pada hasil yang tersedia di project, bukan perkiraan.
 
-| Scenario | Load | Configuration | Executor |
-|---|---|---|---|
-| Baseline | 1 VU | 5 iterations | Per-VU iterations |
-| Load Test 10 | 10 VUs | 30s up / 2m hold / 30s down | Ramping VUs |
-| Load Test 50 | 50 VUs | 2m up / 3m hold / 1m down | Ramping VUs |
-| Load Test 100 | 100 VUs | 3m up / 5m hold / 1m down | Ramping VUs |
-| Stress Test | 100 VUs | 1m up / 2m hold / 1m down | Ramping VUs |
-| Soak Test | 20 VUs | 30m constant | Constant VUs |
+## 2. Tujuan dan Ruang Lingkup
 
-Ramp-up stages were selected to gradually introduce concurrent VUs and observe latency/error changes. Baseline repeats the complete flow five times with one VU. Stress reaches 100 VUs within 60 seconds; soak uses 20 VUs (20% of the 100-VU peak) for 30 minutes. Ramping/constant-VU tests are duration-based, so the number of completed iterations depends on response times and request failures.
+Tujuan utama pengujian adalah mengetahui waktu respons API, jumlah request yang dapat diproses, persentase kegagalan HTTP, dan keberhasilan validasi fungsional saat beban bertambah. Pengujian juga digunakan untuk mengidentifikasi indikasi penurunan performa pada skenario dengan jumlah pengguna tinggi.
 
-## 3. Acceptance thresholds
+Alur yang diuji:
 
-- `http_req_duration`: p95 < 3,000 ms.
-- `http_req_failed`: rate < 5%.
-- `checks`: rate > 95%.
+1. **Login** — `POST /Account/v1/Login` untuk autentikasi dan mengambil `userId`.
+2. **Generate Token** — `POST /Account/v1/GenerateToken` untuk memperoleh token autentikasi.
+3. **Browse Books** — `GET /BookStore/v1/Books` untuk mengambil daftar buku dan ISBN.
+4. **Select Book** — `GET /BookStore/v1/Book?ISBN={isbn}` untuk membuka detail buku terpilih.
+5. **Cleanup Collection** — `DELETE /BookStore/v1/Books?UserId={userId}` untuk mengosongkan koleksi akun uji sebelum penambahan buku.
+6. **Add Book** — `POST /BookStore/v1/Books` untuk menambahkan buku ke koleksi akun.
 
-All three must pass for a scenario to be labeled PASS. The JSON `thresholds` flags are k6 **breach indicators** (`true` means threshold breached), not PASS indicators.
+**Catatan:** Proses cleanup dilakukan sebelum Add Book dan menghapus seluruh koleksi buku pada akun uji. Akun yang digunakan sebaiknya merupakan akun khusus pengujian.
 
-## 4. Results summary
+## 3. Metode dan Konfigurasi
 
-| Scenario | VUs | p95 | Avg RT | HTTP failures | Checks passed | Throughput | Completed iterations | Result |
-|---|---|---|---|---|---|---|---|---|
-| Baseline | 1 VU | 1.63s | 0.70s | 0.00% | 100.00% | 0.37 req/s | 5 | PASS |
-| Load Test 10 | 10 VUs | 4.10s | 1.13s | 0.00% | 100.00% | 2.70 req/s | 85 | FAIL |
-| Load Test 50 | 50 VUs | 29.34s | 12.96s | 0.10% | 97.96% | 2.56 req/s | 150 | FAIL |
-| Load Test 100 | 100 VUs | 49.66s | 23.14s | 67.18% | 28.00% | 1.74 req/s | 893 | FAIL |
-| Stress Test | 100 VUs | 50.96s | 11.51s | 53.41% | 42.82% | 5.83 req/s | 475 | FAIL |
-| Soak Test | 20 VUs | 11.66s | 7.71s | 1.16% | 98.82% | 1.46 req/s | 544 | FAIL |
+Script utama berada pada `performance.js`. Data akun dibaca dari `data/users.csv` melalui `SharedArray` dan dibagikan berdasarkan ID virtual user sehingga masing-masing VU menggunakan akun yang berbeda. ISBN diambil dari response Browse Books, sedangkan fallback CSV hanya digunakan apabila opsi `ALLOW_FALLBACK_ISBN=true` diaktifkan. Antarproses terdapat *think time* acak sekitar 1–3 detik.
 
-*RT = HTTP request response time; throughput = HTTP requests per second, not completed end-to-end transactions per second. Values are rounded for presentation.*
+| Skenario | Beban | Pola Eksekusi |
+|---|---|---|
+| Baseline | 1 VU | 1 VU, 5 iterasi |
+| Load 10 VU | 10 VU | 30 dtk naik, 2 mnt stabil, 30 dtk turun |
+| Load 50 VU | 50 VU | 2 mnt naik, 3 mnt stabil, 1 mnt turun |
+| Load 100 VU | 100 VU | 3 mnt naik, 5 mnt stabil, 1 mnt turun |
+| Stress 100 VU | 100 VU | 1 mnt naik, 2 mnt stabil, 1 mnt turun |
+| Soak 20 VU | 20 VU | 30 menit konstan |
 
-## 5. Scenario details
+### Kriteria Keberhasilan
 
-### Baseline
+Threshold yang didefinisikan dalam script:
 
-- Executor: Per-VU iterations; configuration: 5 iterations.
-- Requests: 30; completed iterations: 5; throughput: 0.37 requests/second.
-- Average response time: 0.70s; p95: 1.63s.
-- HTTP failure rate: 0.00%; check success rate: 100.00%.
-- Threshold outcome: **PASS**.
-- Evidence: [`results/baseline.json`](results/baseline.json) and [`results/baseline-report.html`](results/baseline-report.html).
+| Metrik | Target |
+|---|---|
+| `http_req_duration` p95 | Kurang dari 3.000 ms |
+| `http_req_failed` | Kurang dari 5% |
+| `checks` | Lebih dari 95% |
 
-### Load Test 10
+Skenario dinyatakan **PASS** hanya jika ketiga threshold terpenuhi. `http_req_failed` menunjukkan kegagalan request HTTP menurut k6, sedangkan `checks` menunjukkan persentase pemeriksaan yang berhasil. Keduanya tidak selalu menghasilkan angka yang sama.
 
-- Executor: Ramping VUs; configuration: 30s up / 2m hold / 30s down.
-- Requests: 510; completed iterations: 85; throughput: 2.70 requests/second.
-- Average response time: 1.13s; p95: 4.10s.
-- HTTP failure rate: 0.00%; check success rate: 100.00%.
-- Threshold outcome: **FAIL**.
-- Evidence: [`results/load10.json`](results/load10.json) and [`results/load10-report.html`](results/load10-report.html).
+## 4. Rekapitulasi Hasil
 
-### Load Test 50
+| Skenario | Rata-rata RT | p95 RT | HTTP gagal | Check berhasil | Request/detik | Iterasi selesai | Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Baseline | 697,97 ms | 1.630,83 ms | 0.00% | 100.00% | 0,37 | 5 | PASS |
+| Load 10 VU | 1.125,03 ms | 4.102,41 ms | 0.00% | 100.00% | 2,70 | 85 | FAIL |
+| Load 50 VU | 12.962,77 ms | 29.338,60 ms | 0.10% | 97.96% | 2,56 | 150 | FAIL |
+| Load 100 VU | 23.140,47 ms | 49.656,17 ms | 67.18% | 28.00% | 1,74 | 893 | FAIL |
+| Stress 100 VU | 11.508,25 ms | 50.964,28 ms | 53.41% | 42.82% | 5,83 | 475 | FAIL |
+| Soak 20 VU | 7.711,56 ms | 11.657,39 ms | 1.16% | 98.82% | 1,46 | 544 | FAIL |
 
-- Executor: Ramping VUs; configuration: 2m up / 3m hold / 1m down.
-- Requests: 964; completed iterations: 150; throughput: 2.56 requests/second.
-- Average response time: 12.96s; p95: 29.34s.
-- HTTP failure rate: 0.10%; check success rate: 97.96%.
-- Threshold outcome: **FAIL**.
-- Evidence: [`results/load50.json`](results/load50.json) and [`results/load50-report.html`](results/load50-report.html).
+**Interpretasi:** p95 merupakan waktu respons yang tidak dilampaui oleh sekitar 95% request yang tercatat. Angka throughput di atas adalah request HTTP per detik, bukan jumlah transaksi end-to-end yang berhasil per detik.
 
-### Load Test 100
+## 5. Detail Hasil per Skenario
 
-- Executor: Ramping VUs; configuration: 3m up / 5m hold / 1m down.
-- Requests: 2514; completed iterations: 893; throughput: 1.74 requests/second.
-- Average response time: 23.14s; p95: 49.66s.
-- HTTP failure rate: 67.18%; check success rate: 28.00%.
-- Threshold outcome: **FAIL**.
-- Evidence: [`results/load100.json`](results/load100.json) and [`results/load100-report.html`](results/load100-report.html).
+### 5.1 Baseline
 
-### Stress Test
+**Konfigurasi:** 1 VU, 5 iterasi.  
+**Hasil threshold:** PASS.
 
-- Executor: Ramping VUs; configuration: 1m up / 2m hold / 1m down.
-- Requests: 1524; completed iterations: 475; throughput: 5.83 requests/second.
-- Average response time: 11.51s; p95: 50.96s.
-- HTTP failure rate: 53.41%; check success rate: 42.82%.
-- Threshold outcome: **FAIL**.
-- Evidence: [`results/stress.json`](results/stress.json) and [`results/stress-report.html`](results/stress-report.html).
+| Metrik | Hasil |
+|---|---:|
+| Total HTTP request | 30 |
+| Throughput | 0,37 req/detik |
+| Iterasi selesai | 5 |
+| Response time minimum | 194,19 ms |
+| Response time rata-rata | 697,97 ms |
+| Median (p50) | 565,01 ms |
+| p90 | 1.335,12 ms |
+| p95 | 1.630,83 ms |
+| Response time maksimum | 2.711,50 ms |
+| HTTP request gagal | 0.00% |
+| Check berhasil | 100.00% |
 
-### Soak Test
+Ketiga threshold terpenuhi. Pada tingkat beban ini, response time p95, tingkat kegagalan HTTP, dan hasil check masih berada dalam batas yang ditetapkan.
 
-- Executor: Constant VUs; configuration: 30m constant.
-- Requests: 3274; completed iterations: 544; throughput: 1.46 requests/second.
-- Average response time: 7.71s; p95: 11.66s.
-- HTTP failure rate: 1.16%; check success rate: 98.82%.
-- Threshold outcome: **FAIL**.
-- Evidence: [`results/soak.json`](results/soak.json) and [`results/soak-report.html`](results/soak-report.html).
+Bukti pengujian: `results/baseline.json` dan `results/baseline-report.html`.
 
-## 6. Findings and interpretation
+### 5.2 Load 10 VU
 
-1. **Baseline:** The supplied run meets all three thresholds. This confirms the test flow works at low concurrency in that run, not production readiness.
-2. **Load 10:** Compare the 10-VU result with baseline for initial scaling behavior. A PASS here does not imply higher concurrency will pass.
-3. **Load 50 and 100:** The supplied results show substantially higher p95 latency and/or unsuccessful checks. The service or its dependencies did not maintain the selected service-level thresholds during these runs. Failed checks can include application-response validation, not just HTTP transport errors.
-4. **Stress:** The 60-second ramp to 100 VUs breaches the thresholds; the result is evidence of significant degradation under the tested conditions, **not** a proven maximum capacity or a precise saturation point.
-5. **Soak:** Sustained 20-VU behavior should be judged by latency and failure trends as well as the aggregate summary. The provided JSON alone does not prove a memory leak. Server memory/CPU telemetry and time-series evidence would be needed.
-6. **Limitations:** DemoQA is a public shared demo system. Results can be affected by other traffic, rate limiting, connectivity, service instability, and client-side execution constraints. Root cause cannot be determined from these client-side metrics alone.
+**Konfigurasi:** 30 dtk naik, 2 mnt stabil, 30 dtk turun.  
+**Hasil threshold:** FAIL.
 
-## 7. Correlation and functional checks
+| Metrik | Hasil |
+|---|---:|
+| Total HTTP request | 510 |
+| Throughput | 2,70 req/detik |
+| Iterasi selesai | 85 |
+| Response time minimum | 176,39 ms |
+| Response time rata-rata | 1.125,03 ms |
+| Median (p50) | 623,30 ms |
+| p90 | 2.738,81 ms |
+| p95 | 4.102,41 ms |
+| Response time maksimum | 8.556,20 ms |
+| HTTP request gagal | 0.00% |
+| Check berhasil | 100.00% |
 
-- CSV provides distinct user credentials by `exec.vu.idInTest`.
-- Login response provides `userId`; script may fall back to the CSV `userId` if Login does not return one.
-- GenerateToken response provides `token`; requests use `Authorization: Bearer <token>`.
-- Browse Books response supplies a dynamic ISBN, reused for Select Book and Add Book. CSV fallback is only used when `ALLOW_FALLBACK_ISBN=true`.
-- `check()` validates HTTP status, token/userId presence, Browse ISBN availability, Select ISBN match, cleanup 204, Add 201, and returned ISBN match.
-- `group()` and request `step` tags distinguish logical steps. `sleep(1–3 seconds)` simulates think time.
-- The baseline console log shared during review shows five `Source=API` ISBN selections and 65/65 successful checks; this additional run is not necessarily the same run as the archived baseline JSON.
+Skenario ini belum memenuhi seluruh kriteria karena p95 response time melebihi batas 3.000 ms.
 
-**Important:** k6 `group()` is a logical grouping mechanism, not identical to a JMeter Transaction Controller. This project is a **k6 implementation**, not a JMeter `.jmx` deliverable.
+Bukti pengujian: `results/load10.json` dan `results/load10-report.html`.
 
-## 8. Recommendations
+### 5.3 Load 50 VU
 
-- Investigate latency spikes, 5xx responses, and failed token/login checks using server-side logs and infrastructure metrics on an authorized test environment.
-- Compare per-step trends (`step=login`, `token`, `browse`, `select`, `cleanup`, `add`) to locate bottlenecks; aggregate request p95 does not isolate one endpoint.
-- Verify full end-to-end success per iteration with an explicit final E2E check or counter if an exact transaction success rate is required; early `return` statements can end iterations without marking the entire iteration as failed.
-- Avoid further high-load testing of the public demo environment without explicit authorization and coordination.
-- For leak investigation, collect memory/CPU metrics and a time-series profile during an authorized long-duration soak.
+**Konfigurasi:** 2 mnt naik, 3 mnt stabil, 1 mnt turun.  
+**Hasil threshold:** FAIL.
 
-## 9. Reproducibility and evidence
+| Metrik | Hasil |
+|---|---:|
+| Total HTTP request | 964 |
+| Throughput | 2,56 req/detik |
+| Iterasi selesai | 150 |
+| Response time minimum | 182,85 ms |
+| Response time rata-rata | 12.962,77 ms |
+| Median (p50) | 10.582,89 ms |
+| p90 | 26.209,34 ms |
+| p95 | 29.338,60 ms |
+| Response time maksimum | 60.001,34 ms |
+| HTTP request gagal | 0.10% |
+| Check berhasil | 97.96% |
 
-See [README.md](README.md) for commands, dataset setup, and repository safety. The archived HTML dashboard and JSON summary for each scenario are linked in Section 5. **Do not commit `data/users.csv`**, credentials, or authentication tokens.
+Skenario ini belum memenuhi seluruh kriteria karena p95 response time melebihi batas 3.000 ms.
+
+Bukti pengujian: `results/load50.json` dan `results/load50-report.html`.
+
+### 5.4 Load 100 VU
+
+**Konfigurasi:** 3 mnt naik, 5 mnt stabil, 1 mnt turun.  
+**Hasil threshold:** FAIL.
+
+| Metrik | Hasil |
+|---|---:|
+| Total HTTP request | 2514 |
+| Throughput | 1,74 req/detik |
+| Iterasi selesai | 893 |
+| Response time minimum | 169,62 ms |
+| Response time rata-rata | 23.140,47 ms |
+| Median (p50) | 187,09 ms |
+| p90 | 32.021,71 ms |
+| p95 | 49.656,17 ms |
+| Response time maksimum | 1.152.711,68 ms |
+| HTTP request gagal | 67.18% |
+| Check berhasil | 28.00% |
+
+Skenario ini belum memenuhi seluruh kriteria karena p95 response time melebihi batas 3.000 ms, serta persentase kegagalan HTTP mencapai atau melampaui 5%, serta persentase check berhasil tidak melebihi 95%.
+
+Bukti pengujian: `results/load100.json` dan `results/load100-report.html`.
+
+### 5.5 Stress 100 VU
+
+**Konfigurasi:** 1 mnt naik, 2 mnt stabil, 1 mnt turun.  
+**Hasil threshold:** FAIL.
+
+| Metrik | Hasil |
+|---|---:|
+| Total HTTP request | 1524 |
+| Throughput | 5,83 req/detik |
+| Iterasi selesai | 475 |
+| Response time minimum | 164,64 ms |
+| Response time rata-rata | 11.508,25 ms |
+| Median (p50) | 189,07 ms |
+| p90 | 38.982,44 ms |
+| p95 | 50.964,28 ms |
+| Response time maksimum | 60.027,81 ms |
+| HTTP request gagal | 53.41% |
+| Check berhasil | 42.82% |
+
+Skenario ini belum memenuhi seluruh kriteria karena p95 response time melebihi batas 3.000 ms, serta persentase kegagalan HTTP mencapai atau melampaui 5%, serta persentase check berhasil tidak melebihi 95%.
+
+Bukti pengujian: `results/stress.json` dan `results/stress-report.html`.
+
+### 5.6 Soak 20 VU
+
+**Konfigurasi:** 30 menit konstan.  
+**Hasil threshold:** FAIL.
+
+| Metrik | Hasil |
+|---|---:|
+| Total HTTP request | 3274 |
+| Throughput | 1,46 req/detik |
+| Iterasi selesai | 544 |
+| Response time minimum | 169,83 ms |
+| Response time rata-rata | 7.711,56 ms |
+| Median (p50) | 3.615,55 ms |
+| p90 | 9.851,25 ms |
+| p95 | 11.657,39 ms |
+| Response time maksimum | 627.995,87 ms |
+| HTTP request gagal | 1.16% |
+| Check berhasil | 98.82% |
+
+Skenario ini belum memenuhi seluruh kriteria karena p95 response time melebihi batas 3.000 ms.
+
+Bukti pengujian: `results/soak.json` dan `results/soak-report.html`.
+
+## 6. Analisis Hasil
+
+### Perubahan waktu respons saat beban meningkat
+
+Perbandingan Baseline, Load 10, Load 50, dan Load 100 menunjukkan bagaimana respons API berubah ketika jumlah virtual user dinaikkan. Perlu diperhatikan bahwa setiap skenario memiliki pola ramp-up dan durasi yang berbeda, sehingga perbandingan ini merupakan indikasi perilaku sistem pada konfigurasi yang diuji, bukan pengukuran kapasitas maksimum secara definitif.
+
+### Hubungan kegagalan HTTP dan validasi fungsional
+
+Request yang mendapat respons HTTP sukses belum tentu memenuhi semua pemeriksaan bisnis. Script memeriksa keberadaan `userId`, token, ISBN, kecocokan detail buku, keberhasilan cleanup, serta penambahan buku. Karena script dapat menghentikan iterasi lebih awal ketika data atau token tidak tersedia, jumlah iterasi yang tercatat tidak dapat langsung dianggap sebagai jumlah alur end-to-end yang sukses.
+
+### Evaluasi stress dan soak
+
+Stress test digunakan untuk melihat respons sistem saat jumlah VU meningkat lebih cepat. Soak test mempertahankan 20 VU selama 30 menit untuk mengamati perilaku dalam durasi lebih panjang. Hasil soak dapat menunjukkan gejala perlambatan atau kegagalan selama pengujian, tetapi tidak cukup untuk menyimpulkan adanya *memory leak* tanpa metrik penggunaan memori, CPU, dan log server.
+
+### Keterbatasan analisis
+
+DemoQA merupakan layanan demo publik yang dapat dipengaruhi traffic pengguna lain, kondisi jaringan, pembatasan request, dan kondisi layanan saat pengujian. File ringkasan JSON memuat metrik agregat; untuk memastikan endpoint mana yang paling lambat perlu meninjau data per-step atau dashboard terperinci. Penyebab masalah di sisi server tidak dapat dipastikan hanya dari metrik k6.
+
+## 7. Kesimpulan
+
+Berdasarkan hasil yang tersimpan, status masing-masing skenario adalah: **Baseline: PASS**, **Load 10 VU: FAIL**, **Load 50 VU: FAIL**, **Load 100 VU: FAIL**, **Stress 100 VU: FAIL**, **Soak 20 VU: FAIL**.
+
+Hasil tersebut menunjukkan bahwa keberhasilan pengujian tidak cukup dinilai hanya dari banyaknya request yang diproses. Konsistensi waktu respons, kegagalan HTTP, dan keberhasilan check juga perlu diperhatikan. Pada skenario yang berstatus FAIL, satu atau lebih threshold yang ditetapkan belum tercapai.
+
+## 8. Rekomendasi Tindak Lanjut
+
+1. Periksa endpoint yang paling banyak menyumbang latency menggunakan tag `step` (`login`, `token`, `browse`, `select`, `cleanup`, dan `add`).
+2. Cocokkan lonjakan response time dengan log aplikasi, error 4xx/5xx, penggunaan CPU, memori, dan database pada lingkungan yang memang diizinkan untuk load test.
+3. Tambahkan metrik khusus untuk menghitung keberhasilan satu alur end-to-end secara utuh, karena iterasi dapat berhenti sebelum langkah Add Book.
+4. Gunakan lingkungan staging atau performance test yang terkontrol untuk pengujian lanjutan, bukan menaikkan beban pada layanan demo publik tanpa izin.
+5. Ulangi pengujian dengan konfigurasi dan data uji yang konsisten setelah perbaikan agar perubahan performa dapat dibandingkan.
+
+## 9. Dokumentasi dan Evidence
+
+Berkas pendukung pada folder project:
+
+- `performance.js` — script utama beserta enam skenario dan threshold.
+- `registerUsers.js` — utility pembuatan akun uji.
+- `testLogin.js` — utility validasi login.
+- `data/books.csv` dan `data/users.example.csv` — contoh data pengujian.
+- `results/*.json` — ringkasan metrik k6 untuk masing-masing skenario.
+- `results/*-report.html` — dashboard HTML hasil pengujian.
+- `PerformanceTest_MiaSayidaFatma_K6_Recording.webm` — rekaman pengujian yang disertakan pada arsip.
