@@ -5,7 +5,6 @@
 **Tools:** Grafana k6 (JavaScript)  
 **Aplikasi:** DemoQA Book Store API  
 **Base URL pada script:** `https://demoqa.com`  
-**Sumber hasil:** File `results/*.json` dan dashboard `results/*-report.html` dari arsip pengujian.  
 
 ## 1. Ringkasan Pengujian
 
