@@ -1,0 +1,40 @@
+{
+  "loginEntry": [
+    "~Login",
+    "android=new UiSelector().textContains(\"Masuk\")",
+    "android=new UiSelector().textContains(\"Login\")"
+  ],
+  "username": [
+    "~username",
+    "android=new UiSelector().resourceId(\"REPLACE_WITH_USERNAME_RESOURCE_ID\")"
+  ],
+  "password": [
+    "~password",
+    "android=new UiSelector().resourceId(\"REPLACE_WITH_PASSWORD_RESOURCE_ID\")"
+  ],
+  "loginButton": [
+    "~loginButton",
+    "android=new UiSelector().text(\"Masuk\")",
+    "android=new UiSelector().text(\"Login\")"
+  ],
+  "errorMessage": [
+    "~loginError",
+    "android=new UiSelector().textContains(\"salah\")",
+    "android=new UiSelector().textContains(\"tidak valid\")"
+  ],
+  "homeMarker": [
+    "~home",
+    "android=new UiSelector().text(\"Beranda\")"
+  ],
+  "menuList": [
+    "~menuList",
+    "android=new UiSelector().text(\"Kategori\")"
+  ],
+  "accountName": [
+    "~accountName"
+  ],
+  "pointList": [
+    "~pointList",
+    "android=new UiSelector().textContains(\"Poin\")"
+  ]
+}

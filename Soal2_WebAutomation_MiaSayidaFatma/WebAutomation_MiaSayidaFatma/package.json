@@ -1,0 +1,24 @@
+{
+  "name": "webautomation_miasayidafatma",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "wdio run ./wdio.conf.js",
+    "test:spec": "wdio run ./wdio.conf.js --spec",
+    "test:login": "wdio run ./wdio.conf.js --spec ./features/curaHealthcare/login.feature",
+    "test:appointment:negative": "wdio run ./wdio.conf.js --spec ./features/curaHealthcare/makeAppointmentNegative.feature",
+    "test:appointment:positive": "wdio run ./wdio.conf.js --spec ./features/curaHealthcare/makeAppointmentPostive.feature",
+    "test:curaHealthcare": "wdio run ./wdio.conf.js --spec ./features/curaHealthcare/*.feature"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@wdio/cli": "^10.1.0",
+    "@wdio/cucumber-framework": "^10.1.0",
+    "@wdio/local-runner": "^10.1.0",
+    "@wdio/spec-reporter": "^10.1.0"
+  }
+}
